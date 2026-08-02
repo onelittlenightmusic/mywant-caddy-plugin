@@ -1,0 +1,184 @@
+wantType:
+  metadata:
+    name: caddy
+    title: Caddy HTTPS Reverse Proxy
+    description: |
+      Runs Caddy as a local reverse proxy that terminates HTTPS using its
+      built-in internal CA, so LAN clients (e.g. the Web Inspector
+      bookmarklet on an iPhone) can reach mywant-gui over https:// without
+      hitting mixed-content blocks.
+
+      Starts caddy in the background and, once the process is confirmed
+      running, persists two config.yaml fields automatically so the GUI
+      picks them up without any manual copy/paste:
+        - web_inspector_ca_cert_path: filesystem path to Caddy's internal CA
+          root cert (served to phones at GET /api/v1/web-wants/ca-cert)
+        - https_path: a certificate-confirmed https:// origin (e.g.
+          https://localhost:8443)
+
+      Requirements:
+        - caddy must be installed and available in PATH (brew install caddy)
+        - A Caddyfile that reverse-proxies to mywant-gui, with explicit
+          hostnames listed (a bare ":8443" blocks on-demand cert issuance) —
+          see mywant-gui/docs/WebInspectorIPhone.md for a working example
+    version: "1.0"
+    category: tunnel
+    pattern: independent
+
+  parameters:
+    - name: caddyfile_path
+      description: Path to the Caddyfile caddy should run with
+      type: string
+      default: "/opt/homebrew/etc/Caddyfile"
+    - name: command
+      description: Path to caddy binary
+      type: string
+      default: "caddy"
+    - name: log_file
+      description: Path to capture caddy output (auto-generated if empty)
+      type: string
+      default: ""
+    - name: ca_cert_path
+      description: |
+        Filesystem path to Caddy's internal CA root cert. Written into
+        config.yaml's web_inspector_ca_cert_path once caddy is confirmed
+        running. Set to "" to skip.
+
+        Default matches `caddy run`'s data dir when launched directly (this
+        want's own default: `caddy.AppDataDir` from `caddy environ`, i.e.
+        `$HOME/Library/Application Support/Caddy/...`) — NOT the same as
+        `brew services start caddy`, which uses a different data dir
+        (`/opt/homebrew/var/lib/caddy/...` on Apple Silicon) and therefore a
+        DIFFERENT CA. If you run caddy via `brew services` instead of this
+        want, override ca_cert_path to match, or the persisted cert won't
+        match the one actually serving your connections.
+      type: string
+      default: "${HOME}/Library/Application Support/Caddy/pki/authorities/local/root.crt"
+    - name: https_path
+      description: |
+        Certificate-confirmed https:// origin to persist into config.yaml's
+        https_path field. Set to "" to skip. Should match an address:port
+        this Caddyfile actually listens on.
+      type: string
+      default: "https://localhost:8443"
+
+  requires:
+    - live_server_management
+
+  finalResultField: https_path
+
+  onInitialize:
+    params:
+      process_command: command
+      process_log_file: log_file
+      ca_cert_path: ca_cert_path
+      https_path: https_path
+    current:
+      process_args: '["run", "--config", "${caddyfile_path}"]'
+    plan:
+      process_plan: "start"
+    executeAgents: true
+
+  onDelete:
+    plan:
+      process_plan: "stop"
+    executeAgents: true
+
+  achievedWhen:
+    field: process_status
+    operator: "=="
+    value: "running"
+
+  state:
+    - name: process_pid
+      type: int
+      label: current
+      persistent: true
+      initialValue: 0
+
+    - name: status
+      description: Set by the shared launch_manager agent on successful start ("running") or failure ("failed")
+      type: string
+      label: current
+      persistent: true
+      initialValue: ""
+
+    - name: process_status
+      description: Mirrors status; used by achievedWhen
+      type: string
+      label: current
+      persistent: true
+      initialValue: ""
+
+    - name: process_log_file
+      type: string
+      label: current
+      persistent: true
+      initialValue: ""
+
+    - name: process_command
+      type: string
+      label: current
+      persistent: false
+      initialValue: ""
+
+    - name: process_args
+      type: string
+      label: current
+      persistent: false
+      initialValue: ""
+
+    - name: process_plan
+      type: string
+      label: plan
+      persistent: false
+      initialValue: ""
+
+    - name: launch_summary
+      description: JSON summary (status, command, pid, log_file) written on successful start
+      type: string
+      label: current
+      persistent: true
+      initialValue: ""
+
+    - name: ca_cert_path
+      description: Filesystem path to Caddy's internal CA root cert — mirrors config.yaml's web_inspector_ca_cert_path once persisted
+      type: string
+      label: current
+      persistent: true
+      initialValue: ""
+
+    - name: https_path
+      description: Certificate-confirmed https:// origin — mirrors config.yaml's https_path once persisted
+      type: string
+      label: current
+      persistent: true
+      initialValue: ""
+
+    - name: error_message
+      type: string
+      label: current
+      persistent: true
+      initialValue: ""
+
+    - name: launch_error
+      type: string
+      label: current
+      persistent: true
+      initialValue: ""
+
+  examples:
+    - name: default
+      description: Start caddy with the default Caddyfile and persist config.yaml's web_inspector_ca_cert_path / https_path
+      want:
+        metadata:
+          name: caddy-proxy
+          type: caddy
+      expectedBehavior: |
+        Starts `caddy run --config /opt/homebrew/etc/Caddyfile`. Once the
+        process is confirmed running, config.yaml gains:
+          web_inspector_ca_cert_path: $HOME/Library/Application Support/Caddy/pki/authorities/local/root.crt
+          https_path: https://localhost:8443
+        The Web Inspector Bookmarklet Setup sidebar's iPhone tab can then
+        offer the CA cert download directly, and the 外部ネットワーク tab
+        can use https_path as a certificate-confirmed origin.
