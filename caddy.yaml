@@ -1,6 +1,8 @@
 wantType:
   metadata:
     name: caddy
+    labels:
+      aliases: "caddy"
     title: Caddy HTTPS Reverse Proxy
     description: |
       Runs Caddy as a local reverse proxy that terminates HTTPS using its
